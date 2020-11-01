@@ -1,14 +1,3 @@
----
-title: "Repository 6"
-author: "David Greussing"
-date: "31 10 2020"
-output: html_document
----
-
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
-
-
 remotes::install_github("braverock/factorAnalytics",  build_vignettes = TRUE, force = TRUE)
 pacman::p_load(tidyverse,tidyquant,FFdownload,FactorAnalytics,PerformanceAnalytics)
 pacman::p_load(tidyverse,tidyquant,FFdownload,PortfolioAnalytics,nloptr)
@@ -31,23 +20,23 @@ pacman::p_load(tidyverse,tidyquant,PortfolioAnalytics,nloptr,tsibble,matrixcalc,
 
 
 **Please** remember to put your assignment solutions in `rmd` format using **many** chunks and putting readable text in between, similar to my examples given in Research Methods and Assignment 1!
-
-For all exercises: Please use the Assignment-Forum to post your questions, I will try my best to help you along! If you follow the vignettes from `factorAnalytics`, wherever it says `z.score=T`, please exchange it for either `z.score='crossSection'` or `z.score='timeSeries'` depending on the task at hand.
+  
+  For all exercises: Please use the Assignment-Forum to post your questions, I will try my best to help you along! If you follow the vignettes from `factorAnalytics`, wherever it says `z.score=T`, please exchange it for either `z.score='crossSection'` or `z.score='timeSeries'` depending on the task at hand.
 
 ## Exercise 1: Estimating the CAPM (from A05)
 
 In this exercise we want to estimate the CAPM. Please read carefully through the two documents provided (right hand side: files). Then we start to collect the necessary data:
   
-a) From Datastream get the last 10 years of data from the 100 stocks of the S&P100 using the list `LS&P100I` (S&P 100): total return index (RI) and market cap (MV)
+  a) From Datastream get the last 10 years of data from the 100 stocks of the S&P100 using the list `LS&P100I` (S&P 100): total return index (RI) and market cap (MV)
 b) Further import the Fama-French-Factors from Kenneth Frenchs homepage (monthly, e.g. using `FFdownload`). From both datasets we select data for the last (available) 60 months, calculate returns (simple percentage) for the US-Stocks and eliminate those stocks that have NAs for this period.
 c) Now subtract the risk-free rate from all the stocks. Then estimate each stocks beta with the market: Regress all stock excess returns on the market excess return and save all betas (optimally use `mutate` and `map` in combination with `lm`). Estimate the mean-return for each stock and plot the return/beta-combinations. Create the security market line and include it in the plot! What do you find?
-d) In a next step (following both documents), we sort the stocks according to their beta and build ten value-weighted portfolios (with more or less the same number of stocks). Repeat a) for the ten portfolios. What do you observe?
-e) In the third step you follow page 6-8 of the second document and estimate the second-pass regression with the market and then market & idiosyncratic risk. What do you observe? Present all your results in a similar fashion as in the document.
+  d) In a next step (following both documents), we sort the stocks according to their beta and build ten value-weighted portfolios (with more or less the same number of stocks). Repeat a) for the ten portfolios. What do you observe?
+  e) In the third step you follow page 6-8 of the second document and estimate the second-pass regression with the market and then market & idiosyncratic risk. What do you observe? Present all your results in a similar fashion as in the document.
 
 ## Exercise 2: Calculating and checking the CAPM cont. (from A05)
 
 As we have seen: the CAPM for small portfolios does not work very well, and so we start using portfolios that get rid of the idiosyncratic risk!
-Go to Kenneth French's Homepage  again and download the following datasets: "Portfolios Formed on Market Beta" (where we will use 10 monthly value weighted portfolios formed on beta) and "25 Portfolios Formed on Size and Market Beta" (same thing) as well as the market factor and rf (as before). Now we are going to check the CAPM like famous researchers have done it!
+  Go to Kenneth French's Homepage  again and download the following datasets: "Portfolios Formed on Market Beta" (where we will use 10 monthly value weighted portfolios formed on beta) and "25 Portfolios Formed on Size and Market Beta" (same thing) as well as the market factor and rf (as before). Now we are going to check the CAPM like famous researchers have done it!
 We can use returns as they are in the files (simple returns)!
 
 a)	Subtract the risk-free rate from the first set of 10 portfolios (only sorted on beta) (Lo 10,., Hi 10) and estimate each stocks beta with the market. Estimate the mean-return for each stock and plot the return/beta-combinations. Create the security market line and include it in the plot! What do you find? (You can split the file in 2-3 different time blocks and see if something changes). * Now we are done with the first-pass regression.*
@@ -58,9 +47,195 @@ d)	Try again with 25 portfolios sorted on size and beta. What do you find? Is th
 
 **The purpose of the further assignments is less programming-related (you can copy most of the code), but to receive a positive grade I want you to dig into the referenced literature and be able to explain _everything_ that you do very detailed in the text and your presentation (what do you do, what is the result and how do you intepret the result). After doing this - given the data - you should be perfectly able to estimate/interpret any type of factor model.**
   
-## Exercise 3: Statistical Factor Models
+# Exercise 3: Statistical Factor Models
 
 Follow the file [sfmVignette.pdf](https://github.com/braverock/FactorAnalytics/blob/master/vignettes/sfmVignette.pdf) and interpret your results.
+
+```{r}
+library(timetk)
+SP500 <- tq_index("SP500")
+NASDAQ <- tq_exchange("NASDAQ")
+NYSE <- tq_exchange("NYSE") 
+stocks.selection <- SP500 %>% 
+  inner_join(rbind(NYSE,NASDAQ) %>% select(symbol,last.sale.price,market.cap,ipo.year),by=c("symbol")) %>%
+  filter(ipo.year<2000&!is.na(market.cap)) %>% 
+  arrange(desc(weight)) %>% 
+  slice(1:10)
+stocks.selection
+```
+
+These are the returns of the selected stocks.
+
+```{r}
+stocks.returns <- stocks.selection$symbol %>%
+    tq_get(get  = "stock.prices",
+           from = "2000-01-01",
+           to   = "2019-12-31") %>%
+    group_by(symbol) %>%
+    tq_transmute(select     = adjusted, 
+                 mutate_fun = periodReturn, 
+                 period     = "monthly")
+stocks.returns
+```
+
+These are the stocks return in the xts format and also in a wide format
+````{r}
+stocks.returns.xts <- stocks.returns%>%
+                      subset( select = c(symbol,date, monthly.returns)) %>%
+                      pivot_wider(names_from = symbol, 
+                                  values_from = monthly.returns) %>% 
+                      tk_xts(date_var = date, silent = TRUE)
+colnames(stocks.returns.xts)
+```
+
+### Fit a statistical factor model fitSfm
+
+Principal Component Analysis (PCA): uses the eigen decomposition of the covariance matrix of asset returns to find the first K principal components that explain the largest portion of the sample covariance matrix returns. Factor loading are then estimated using time series regression. Foctor analysis involves maximum likelihood optimization to estimate the factor loadings and the residual covarince matrix, constructing the factor realization and choosing a rotation of the coordinate system for a more meeaningful interpretion of factors
+
+used when T>N
+T: Number of observations
+N: Number of assets
+
+if N>T then Aymptotic Principal Component Analysis (APCA)
+
+#### Principal Component Analysis
+Fitting a statistical factor model with two principal components (k=2)
+```{r}
+fit.pca <- fitSfm(stocks.returns.xts, k=2)
+fit.pca 
+```
+Screenplot of eigenvalues
+An eigenvector of a linear transformation is a nonzero vector that changes by a scalar factor when that linear transformation is applied to it. Eigenvalues and eigenvectors allow us to "reduce" a linear operation to separate, simpler, problems.
+```{r}
+plot(fit.pca, which=1, eig.max = 0.9)
+
+```
+
+First principal component explains about 48% of total variance. The first two components explain about 61% of total variance.
+
+Now plotting the estimated factor returns
+```{r}
+plot(fit.pca, which=2)
+```
+
+Estimated factor loadings for all assets
+Factor loading is the correlation coefficient for the variable and factor.
+```{r}
+
+plot(fit.pca, which=3, a.sub=1:10)
+
+```
+First factor has all positive loadings, whereas the second factor has both positive and negative loadings.
+
+
+```{r}
+t(fit.pca$mimic)
+
+plot(fit.pca, which=12, n.top=3)
+```
+This figure displays the top three assets with the largest and smalles weights in each factor mimicking portfolio. For the first factor, NVIDA, Amazone and Adobe have the highest weights and Amgen, UPS and Microsoft have the lowest weights. Since all weights are positive this might be construed as a market-wide factor. For the second factor, Amazon, Qualcom and Cisco have the highest weights and NVIDA, Apple and Adobe have the lowest weights.
+
+Now plotting the correlations between assets with the top 3 largest and smallest positions in the F.1 factor mimicking portfolio
+
+```{r}
+plot(fit.pca, which=13, f.sub=1, n.top=3)
+```
+Here we can see the correlations between assets with top 3 largest and smallest weight in the factor mimicking portfolio for the first principal component. Correlations are very different.
+
+
+```{r}
+plot(fit.pca, which=13, f.sub=2, n.top=3)
+```
+Here we can see the correlations between assets with top 3 largest and smallest weight in the factor mimicking portfolio for the first principal component. Pretty high correlations overall.
+
+
+
+
+
+#### S3 generic methods
+all estimaded coefficients from PCA including intercept
+```{r}
+coef(fit.pca)
+```
+
+compare returns data with fitted and residual values for AAPL: fit.pca
+```{r}
+AAPL.ts <- merge(fit.pca$data[,1], fitted(fit.pca)[,1], residuals(fit.pca)[,1])
+
+colnames(AAPL.ts) <- c("AAPL.return", "AAPL.fitted", "AAPL.residual")
+
+tail(AAPL.ts)
+```
+
+fitted(): returns an xts data object of the component of asset returns explained by the factor model
+
+residuals(): returns xts data object with the component of asset returns not explained by the factor model
+
+Summary for fit.pca with HAC standard errors (allows for heteroskedasticity and autocorrelation consistent estimates and standard errors)
+```{r}
+sum.pca <- summary(fit.pca, se.type="HAC", n.top=3)
+
+sum.pca$sum.list[[1]]
+```
+factor mimicking portfolio weights
+```{r}
+sum.pca$mimic.sum
+```
+
+### Factor Model Covariance and Risk Decomposition
+
+#### Factor model covariance
+
+```{r}
+Omega <- fmCov(fit.pca)
+# return correlation plot for all assets
+plot(fit.pca, which=8, a.sub=1:10)
+```
+
+#### Standard deviation decomposition
+```{r}
+decomp <- fmSdDecomp(fit.pca)
+
+#get the factor model standard deviation for all assets
+decomp$Sd.fm
+
+#get the component contribution to Sd
+head(decomp$cSd)
+
+#plotting
+plot(fit.pca, which=9, f.sub=1:2, a.sub=1:10)
+```
+
+#### Value-at-Risk decomposition
+```{r}
+decomp1 <- fmVaRDecomp(fit.pca)
+
+#factor model Value-at-Risk
+head(decomp1$VaR.fm)
+
+#Marginal factor contributions to VAR
+head(decomp1$mVaR)
+
+# plotting
+plot(fit.pca, which=11, f.sub=1:2, a.sub=1:10)
+```
+
+
+####Expected Shorfall decomposition
+```{r}
+decomp2 <- fmEsDecomp(fit.pca)
+# factor model Expected Shortfall
+head(decomp2$ES.fm)
+
+# percentage component contribution to ES
+head(decomp2$pcES)
+
+# plotting
+plot(fit.pca, which = 10, f.sub=1:2, a.sub=1:10)
+```
+
+
+
 
 ## Exercise 4: Timeseries Factor Models
 
@@ -81,7 +256,8 @@ options(digits=3)
 
 
 ```{r}
-#The following examples primarily use the managers dataset from the PerformanceAnalytics package. 
+
+# The following examples primarily use the managers dataset from the PerformanceAnalytics package. 
 # It’s an "xts" data object with:
 #                                 - 132 observations of monthly returns
 #                                 - on 10 variables:
@@ -153,7 +329,9 @@ fit.singleIndex <- fitTsfm(asset.names=asset.names,
                            factor.names="SP500.TR",   #specfic factor!
                            rf.name="US.3m.TR", 
                            data=managers)
+                           
 
+head(fit.singleIndex)
 # Interpretation:
 # if the market return rises 1%, then the return of Ham1 rises 0,39%
 # R-squared: 1 would be 100% - linear function matches perfectly with the data --> here we have low R-squared
@@ -235,10 +413,10 @@ fit.mktTiming$resid.sd
 ```
 
 Fits Model:
-
-The different model fitting options are: 
-- (ordinary) least squares (ols / LS) --> Default mode!
-- discounted least squares (DLS) and
+  
+  The different model fitting options are: 
+  - (ordinary) least squares (ols / LS) --> Default mode!
+  - discounted least squares (DLS) and
 - robust regression fitting (Robust)
 
 ### Ordinary least squares ("ols")
@@ -399,7 +577,7 @@ Comparing the *coefficients* and *R-squared values* from the two models, we find
 
 ###  S3 generic methods
 Many useful generic accessor functions are available for "tsfm" fit objects:
-- coef() returns a matrix of estimated model coefficients including the intercept. 
+  - coef() returns a matrix of estimated model coefficients including the intercept. 
 - fitted() returns an xts data object of the component of asset returns explained by the factor model. 
 - residuals() returns an xts data object with the component of asset returns not explained by the factor model. 
 - predict() uses the fitted factor model to estimate asset returns given a set of new or simulated factor return data.
@@ -454,7 +632,7 @@ The general mathematical form of equity fundamental factor model (FFM) implement
 rt = αt· 1 + Bt−1ft + εt, t = 1, 2, · · · , T (1)
 
 where:
-- equity returns vector rt and the vectors 1 and 
+  - equity returns vector rt and the vectors 1 and 
 - εt are N ×1 vectors, 
 - Bt−1 is an N ×K exposures (risk factors) matrix, and 
 - ft is a K × 1 vector of random factor returns. 
@@ -504,11 +682,11 @@ dataDjia5Yr = factorDataSetDjia5Yrs
 
 head(dataDjia5Yr,5) 
 ``` 
- 
- 
+
+
 ### 1. Fitting a Fundamental Factor Model - FFM 
 A FFM is generally fit by a two-step method:
-1) using least squares or robust regression methods in the first step, 
+  1) using least squares or robust regression methods in the first step, 
 2) and using weighted least squares or weighted robust regression in the second step where the weights are computed in the first step.
 
 
@@ -538,17 +716,17 @@ fmRsq(fitDjia5Yr,
       lwd = 0.7, 
       stripText.cex = 0.8, 
       axis.cex = 0.8) 
- 
+
 # Interpretation:
 # 1) Upper Plot: Mean R-Squared across periods = 0.78 (Output of the Junk) 
 #    -> problem, R-Squared increases everytime an independant variable is added, which means the more independant variables the higher the R-Squared. 
 # 2) Mean adjusted R-Squared = 0.54 (Output of the Junk) 
 #    -> as soon as we take the problem with R-Squared into account and use the adjusted mean, we see that the value drops from 78% to 54% and that there are even negative single values. 
- 
+
 ``` 
 #### 1.2 Model Fit Variance Inflation Factors - (VIF’s) 
 When your model includes continuous style factor variables the function ffmRsq also allows you to compute and display the time series of variance inflation factors (VIF’s). These can help you determine whether or not there are any regression collinearity problems.
- 
+
 ```{r} 
 
 # the time series of mean variance inflation factors (VIF’s) 
@@ -558,7 +736,7 @@ vif(fitDjia5Yr,
     lwd = 0.7, 
     stripText.cex = 0.8, 
     axis.cex = 0.8) 
- 
+
 # Interpretation: 
 # A value of 1 means not correlation with other variables:
 # 1) The higher the value, the greater the correlation of the variable with other variables. 
@@ -571,7 +749,7 @@ vif(fitDjia5Yr,
 ``` 
 #### 1.3 Model Fit t-Statistics
 Plots of the time series of t-statistics for the factors in an FFM fitted model, with horizontal dashed lines provided to judge whether or not a factor is significant at the 5% level, may be obtained with the function ffmTstats.
- 
+
 ```{r} 
 
 # The time series of t-statistics for the factors (5% significant level)
@@ -587,7 +765,7 @@ fmTstats(fitDjia5Yr,
 
 
 ``` 
- 
+
 ```{r} 
 # fmTstats can also compute the number of significant t-statistics:
 #         the number of positive, 
@@ -604,15 +782,15 @@ fmTstats(fitDjia5Yr,
 # Interpretation: 
 
 ``` 
- 
+
 ### 2. Risk and Performance Report 
- The factorAnalytics package contains the following risk and performance reporting functions:
- 1) repExposures
- 2) repReturn
- 3) repRisk 
- 
+The factorAnalytics package contains the following risk and performance reporting functions:
+  1) repExposures
+2) repReturn
+3) repRisk 
+
 We illustrate the use of each of these in turn using "fitDjia5Yr" and the corresponding global minimum variance long-only portfolio weights object "wtsDjiaGmvLo" 
- 
+
 ```{r} 
 
 # load the long-only global minimum variance portfolio weights vector 
@@ -622,11 +800,11 @@ data(wtsDjiaGmvLo)
 wtsDjia = wtsDjiaGmvLo 
 
 ``` 
- 
- 
+
+
 #### 2.1) repExposure 
 The portfolio exposure to a given risk factor is the inner (dot) product of the portfolio weight vector with the column of the exposures matrix Bt−1 corresponding to the given factor. The style factors vary over time, but the sector factors are fixed and each sector is represented by a column of zero’s and ones. Thus the portfolio exposure to style factors will vary over time and thus have a distribution with a mean and volatility. On the other hand the portfolio exposure to sector factors will have a fixed value depending on the portfolio weights and number of firms in a given sector.
- 
+
 ```{r} 
 
 # compute volatilities of the style factors and sector factors 
@@ -645,9 +823,9 @@ repExposures(fitDjia5Yr,
 # 3) Stlye factor Size: with 4.6
 
 ``` 
- 
- 
- 
+
+
+
 ```{r} 
 
 # plot the volatilities of the style factors and sector factors 
@@ -660,8 +838,8 @@ repExposures(fitDjia5Yr,
              zeroLine = T, 
              color = "Blue") 
 ``` 
- 
- 
+
+
 ```{r} 
 
 # plot the time series of the style factor exposures 
@@ -677,7 +855,7 @@ repExposures(fitDjia5Yr,
              axis.cex = 0.8) 
 
 ``` 
- 
+
 ```{r} 
 
 #display boxplots of those exposures 
@@ -690,16 +868,16 @@ repExposures(fitDjia5Yr,
              layout = c(3,3)) 
 
 ``` 
- 
- 
+
+
 #### 2.2) repReturn 
 The function repReteurn provides you with the following choices of graphical reports, the results of which will also be printed because of the default printing option isPrint = T:
-1. Time Series plot of portfolio returns decomposition
+  1. Time Series plot of portfolio returns decomposition
 2. Time Series plot of portfolio style factors returns
 3. Time Series plot of portfolio sector returns
 4. Boxplot of Portfolio Returns Components.
 
- 
+
 ```{r} 
 # caluclate mean and volatility of the various portfolio return components with the help of repReturn 
 repReturn(fitDjia5Yr,
@@ -709,7 +887,7 @@ repReturn(fitDjia5Yr,
 
 # Interpretation: 
 ``` 
- 
+
 ```{r} 
 
 # Plot portfolio returns decomposition 
@@ -727,7 +905,7 @@ repReturn(fitDjia5Yr,
 # Interpretation: 
 
 ``` 
- 
+
 ```{r} 
 
 # Plot portfolio styles factor return 
@@ -746,7 +924,7 @@ repReturn(fitDjia5Yr,
 # Interpretation: 
 
 ``` 
- 
+
 ```{r} 
 
 # Plot portfolio sectors return 
@@ -765,7 +943,7 @@ repReturn(fitDjia5Yr,
 # Interpretation: 
 
 ``` 
- 
+
 ```{r} 
 
 # Boxplot of Portfolio Returns Components 
@@ -779,26 +957,26 @@ repReturn(fitDjia5Yr,
 
 ``` 
 
- 
- 
+
+
 #### 2.3) repRisk 
 The function *repRisk* allows one to compute and display (graphically and in tabular form) factor decompositions of risk for a portfolio and for each of the assets used to fit a fundamental factor model with fitFfm. The risk measure can be chosen as:
-- standard deviation/volatility (SD)
+  - standard deviation/volatility (SD)
 - expected shortfall (ES)
 - or value-at-risk (VaR)
 
 and the factor risk decomposition can be chosen as:
-- factor percent contribution to risk (FPCR)
+  - factor percent contribution to risk (FPCR)
 - factor contribution to risk (FCR) 
 - or factor marginal contribution to risk (FMCR). 
- 
- 
+
+
 ```{r} 
 # standard deviation/volatility (SD)
 # factor percent contribution to risk - (FPCR)
 
 # First we compute an FPCR decomposition of the portfolio and individual assets using Sd as the risk measure, and provide both Lattice visualization and tabular displays. For the Lattice display the argument sliceby = “factor” specifies that the panel conditioning is by risk factor and the choice layout = c(5,1) results in a single row with five panels. We used nrowPrint = 10 to shorten the printed output from one row for the portfolio factor risk decomposition and 22 rows (we are only using 22 of the DJIA stocks at the moment) for the stock factor risk decompositions to one row for the portfolio and 9 rows for the assets. 
- 
+
 fitDjia5YrIntStyle = fitFfm(data = dataDjia5Yr,
                             exposure.vars = c("SIZE", "P2B", "EV2S"), 
                             date.var = "DATE", 
@@ -807,7 +985,7 @@ fitDjia5YrIntStyle = fitFfm(data = dataDjia5Yr,
                             fit.method = "WLS", 
                             z.score = "crossSection", 
                             addIntercept = T) 
- 
+
 repRisk(fitDjia5YrIntStyle, 
         wtsDjia, 
         risk = "Sd", 
@@ -824,7 +1002,7 @@ repRisk(fitDjia5YrIntStyle,
 
 
 ``` 
- 
+
 ```{r} 
 # expected shortfall (ES)
 # factor percent contribution to risk - (FPCR)
@@ -845,7 +1023,7 @@ repRisk(fitDjia5YrIntStyle,
 # Interpretation: 
 
 ``` 
- 
+
 ```{r} 
 
 # expected shortfall (ES)
@@ -868,7 +1046,7 @@ repRisk(fitDjia5YrIntStyle,
 # Interpretation: 
 
 ``` 
- 
+
 ```{r} 
 
 # compare the factor risk decompositions of a portfolio using all three risk measures, skipping the risk decomposition of the assets 
@@ -887,12 +1065,12 @@ repRisk(fitDjia5YrIntStyle,
 # Interpretation: 
 
 ``` 
- 
+
 ### 3. Factor Model Monte Carlo 
 The use of factor model Monte Carlo (FMMC) for a fundamental factor model results in a simulated set of asset returns based on a resampling of factor returns and a resampling or simulation of residual returns of the fitted model, using the exposures matrix from the last time period used in fitting the model.  
 The factorAnalytics function fmmcSemiParametric implements the above FMMC method based on function araguments that are the result of first fitting  fundamental factor model to the data with fitFfm, combined with function arguments based on user options concerning the type of FMMC. We will illustrate the use of fmmcSemiParametric on the DJIA five-year monthly data set factorDataSetDjia5Yrs. 
 
- 
+
 ```{r} 
 
 # But first we take a look at the arguments of the function 
@@ -900,7 +1078,7 @@ args(fmmcSemiParam)
 
 ``` 
 Aguments:
-- B is the number of bootstrap samples.
+  - B is the number of bootstrap samples.
 - factor.ret is the set of factor returns estimates returned by the use of fitFfm
 - beta is exposures matrix for the final period returned by fitFfm
 - alpha is a fixed vector of intercept values that if ommited are assumed to be zero. 
@@ -908,7 +1086,7 @@ Aguments:
 Our example below uses the default values B = 1000, boot.method = “random” (means simple bootstrap), seed = 123 (for reproducibility of the example).  
 
 We use two choices of resid.dist, first we use resid.dist = “empirical” which corresponds to 2-(a) above and then we use resid.dist = “normal”. The user must provide appropriate values for resid.par that depend on the the choice for resid.dist. For the choice resid.dist = “empirical” the resid.par must be the N × T dimensional xts time series in the $residuals component of the model fit, and for the choice resid.dist = “normal” the resid.par must be an N × 2 matrix with the first column being estimates of the means of the residuals for each of the N assets and the second column being estimates of the standard deviations of the residuals for each of the assets 
- 
+
 ```{r} 
 # In order to use fmmcSemiParam for the DJIA data we first fit a fundamental factor model (without alpha or market term) to the factorDataSetDjia5Yrs data 
 data("factorDataSetDjia5Yrs") 
@@ -922,7 +1100,7 @@ fit.ffm = fitFfm(data = factorDataSetDjia5Yrs,
                  date.var = "DATE",
                  exposure.vars = exposure.vars) 
 ``` 
- 
+
 ```{r} 
 
 # Next we use fmmcSemiParam to create simulated values of the asset returns based on the use of bootstrapped factor returns and bootstrapped (empirical) residuals: 
@@ -937,7 +1115,7 @@ fmmcDat = fmmcSemiParam(B = 1000,
 names(fmmcDat) 
 ``` 
 "sim.fund.ret" = a B × N matrix of simulated asset returns, "boot.factor.ret" = a B × K matrix of simulated factor returns, "sim.resid" = a B × N matrix of simulated residuals 
- 
+
 ```{r} 
 
 # Now let’s verify that the that returns of the 30 DJIA stocks over the five-year period are well represented by the set of 500 simulated sets of 30 returns in fmmcDat$sim.fund.return with respect to returns means and standard deviations. In order to do this we first extract the multivariate time series of returns of those stocks from the data frame factorDataSetDjia5Yrs 
@@ -951,7 +1129,7 @@ djiaRet = xts(djiaDat,
               as.yearmon(rownames(djiaDat))) 
 
 ``` 
- 
+
 ```{r} 
 
 # Now we compare the simulated returns means with the observed returns means for the first 10 DJIA stocks 
@@ -960,7 +1138,7 @@ round(apply(djiaRet, 2, mean)[1:10], 3)
 round(apply(fmmcDat$sim.fund.ret, 2, mean)[1:10], 3) 
 
 ``` 
- 
+
 ```{r} 
 
 #same thing for returns standard deviations 
@@ -968,16 +1146,16 @@ round(apply(djiaRet, 2, sd)[1:10], 3)
 round(apply(fmmcDat$sim.fund.ret, 2, sd)[1:10], 3) 
 
 ``` 
- 
+
 The use of *fmmcSemiParam* with bootstrapped residuals as well as bootstrapped factor returns is attractive because it is simple and because in addition to making no distributional assumptions about the factor returns it makes no assumptions about the distributions of the residuals. 
- 
+
 By way of contrast let’s see what happens if we assume the residuals associated with the 30 DJIA fitted fundamental factor model returns have normal distributions and fit them using the sample means and standard deviations of the residuals.  
- 
- 
+
+
 ```{r} 
 
 # First we use fmmcSemiParam with default choice resid.dist = “normal” and with resid.par a matrix with first column the sample mean of the residuals and second column the standard deviation of teh residuals 
- 
+
 resid.mean = apply(B = 1000,
                    coredata(fit.ffm$residuals),
                    2, 
@@ -985,15 +1163,15 @@ resid.mean = apply(B = 1000,
                    na.rm = T) 
 
 resid.sd = matrix(sqrt(fit.ffm$resid.var)) 
- 
+
 resid.par = cbind(resid.mean, resid.sd) 
 
 fmmcDatNormal = fmmcSemiParam(factor.ret = fit.ffm$factor.returns, 
-                             beta = fit.ffm$beta, 
-                             resid.par = resid.par,
-                             boot.method = "random") 
+                              beta = fit.ffm$beta, 
+                              resid.par = resid.par,
+                              boot.method = "random") 
 ``` 
- 
+
 ```{r} 
 
 #Then we compare the means of the simulated asset returns with those of the actual returns 
@@ -1001,7 +1179,7 @@ round(apply(djiaRet, 2, mean)[1:10], 3)
 round(apply(fmmcDatNormal$sim.fund.ret, 2, mean)[1:10], 3) 
 
 ``` 
- 
+
 ```{r} 
 
 #Same with the standard deviation 
@@ -1009,19 +1187,19 @@ round(apply(djiaRet, 2, sd)[1:10], 3)
 round(apply(fmmcDatNormal$sim.fund.ret, 2, sd)[1:10], 3)
 
 ``` 
- 
+
 Once again the mean values agree quite well, but we see that the simulated returns based on the assumption of normally distributed returns have volatilities that under-estimate the actual returns volatilities for eight of the first 10 stocks. However, comparison of the volatilities for all 30 stocks reveals that there are only 13 stocks for which the volatilites for the simulated returns are smaller than those of the actual returns, and that when the volatilities of the simulated returns are larger than those of the actual returns they are much larger, for example .093 versus .065 for CAT and .132 versu .068 for HD 
- 
+
 Main message: It is not safe to use normal distributions in modeling stock returns with a fundamental factor model (or otherwise). It is for this reason that fmmcSemiParam allows you to use skewed t-distributions and Cornish-Fisher quantile rerpresentation of non-normal distributions for the residuals. 
- 
- 
+
+
 ### 4. Market plus Industry plus Country Model 
- 
+
 In this discussion we treat the terms “Industry” and “Sector” interchangeably, noting that for some models, e.g., a U.S. equity model, one may prefer to just use sector factors but may also wish to use industry factors, and a global model with countries may also contain industry factors. Our current examples use sector factors but we refer to them in our mathematical models loosely as industry factors. 
- 
- 
+
+
 We will illustrate use of fitFfm to fit a market plus sector model to the DJIA stock returns and sector data. But first we fit a pure sector model without a market component and examine the factor return coefficients for the first month of the five-year fitting window as a reference point. 
- 
+
 ```{r} 
 
 dat = factorDataSetDjia5Yrs 
@@ -1039,9 +1217,9 @@ round(coef(summary(fitSec)$sum.list[[1]])[, 1], 3)
 round(fitSec$factor.returns[1, ], 3) 
 
 ``` 
- 
+
 Note that the last two lines of code produce identical results. This is because without any constraints such as those discussed above, the coefficients of the cross-section regression at each time period are extracted to form the time series of factor returns in the factor.returns component of the ffm object. Now we fit a market plus sector model by adding the fitF argument addIntercept = T,and examine the coefficients gˆmi,1 and the resulting factor returns ˆfmi,1 for the first month of the fiveyear fitting window. 
- 
+
 ```{r} 
 
 fitSecInt = fitFfm(dat,
@@ -1060,21 +1238,21 @@ round(coef(summary(fitSecInt)$sum.list[[1]])[, 1], 2)
 round(fitSecInt$factor.returns[1, ], 2) 
 
 ``` 
- 
+
 ```{r} 
 
 round(sum(fitSecInt$factor.returns[1, -1]), 2) 
 
 ``` 
- 
+
 Note that the next to last line of code above prints the unique least squares model coefficients vector gˆmi,1 for month 1 (9 of them since there are 9 sectors) 
- 
- 
+
+
 ### 5. A Simultated Data Example 
- 
+
 We have created an artificial example of a market+sector+country model (where sector plays the role of industry) consisting of *random returns* of 30 stocks with three sectors for the sector factor and two countries for the countries factor, for each of five months. The *normally distributed returns* for the three sectors alone have means of 1, 2, 3, with standard deviations .2. The two countries contribute additional *normally distributed* returns having means 4 and 5 with standard deviations .2. So returns associated with the first country have means 5, 6, 7 and means associated with the second country have means 6, 7, 8. Thus the overall mean of 6.5. The code for creating the returns is as follows: 
- 
-```{r} 
+  
+  ```{r} 
 
 # Country Incremental Components of Asset Returns 
 
@@ -1098,18 +1276,18 @@ r.cty1 = rep(0, 30)
 r.cty2 = rep(0, 30) 
 
 for (i in 1:30) 
-  {
+{
   if (Bmic[i, "cty1"] == 1) 
-    { 
+  { 
     r.cty1[i] = r.add[i] 
     r.cty2[i] = 0 
-    } 
-  else 
-    { 
-      r.cty1[i] = 0
-      r.cty2[i] = r.add[i] + 1
-    } 
   } 
+  else 
+  { 
+    r.cty1[i] = 0
+    r.cty2[i] = r.add[i] + 1
+  } 
+} 
 
 
 # Asset Returns for Market+Industry+Country Model 
@@ -1121,16 +1299,16 @@ fitMic = list()
 fitMic1 = list() 
 
 for (i in 1:5) 
-  {
+{
   set.seed(1099923 + (i - 1)) 
   r[[i]] = c(rnorm(10, mu[1], sd[1]), 
              rnorm(10, mu[2], sd[2]), 
              rnorm(10, mu[3], sd[3])) 
   r.mic[[i]] = r[[i]] + r.cty1 + r.cty2 
-  } 
+} 
 
 ``` 
- 
+
 ```{r} 
 
 #qq-plot of the 30 asset returns for the first of the 5 time periods 
@@ -1138,7 +1316,7 @@ qqnorm(r.mic[[1]],
        main = "MIC Model Equity Returns for First Period", 
        xlab = "NORMAL QQ-PLOT",
        ylab = "RETURNS") 
- 
+
 
 # Print out of 30 asset returns for the first time period!
 r.mic[[1]] 
@@ -1152,9 +1330,9 @@ r.mic[[1]]
 
 
 ``` 
- 
+
 Now we build the data frame required by fitFfm, fit the *MIC (Market-Industry-country) model* and display the factor returns for each of the five months. What we have been calling the Industry factor is called Sector for this example 
- 
+
 ```{r} 
 # Build the data frame 
 # Extracts a the return element from the list of lists
