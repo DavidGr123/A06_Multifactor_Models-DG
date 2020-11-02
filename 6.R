@@ -809,6 +809,7 @@ plot(fit.pca, which=11, f.sub=1:2, a.sub=1:10)
 ```{r}
 decomp2 <- fmEsDecomp(fit.pca)
 
+
 # factor model Expected Shortfall
 head(decomp2$ES.fm)
 
